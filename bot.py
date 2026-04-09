@@ -2,13 +2,12 @@ import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
-translator = Translator()
 
 
 @bot.event
@@ -41,13 +40,10 @@ async def translate_to_english(interaction: discord.Interaction, message: discor
         return
 
     try:
-        translated = translator.translate(content, dest="en")
-        detected = getattr(translated, "src", "unknown")
+        translated = GoogleTranslator(source="auto", target="en").translate(content)
 
         await interaction.response.send_message(
-            f"🌐 Detected: `{detected}`\n"
-            f"📝 Original: {content}\n"
-            f"🇬🇧 English: {translated.text}",
+            f"📝 Original: {content}\n🇬🇧 English: {translated}",
             ephemeral=True,
         )
     except Exception as e:
