@@ -1,132 +1,95 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
-from discord import app_commands
 from deep_translator import GoogleTranslator
 
-# Retrieve the bot token from the environment
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
-# Initialize bot with default intents
 intents = discord.Intents.default()
+intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+LANG_FLAGS = {
+    "en": "🇬🇧",
+    "fr": "🇫🇷",
+    "de": "🇩🇪",
+    "es": "🇪🇸",
+}
 
-async def translate_replied_message(interaction: discord.Interaction, target_lang: str) -> None:
-    """Helper function to translate the message that the user replied to.
 
-    Parameters
-    ----------
-    interaction : discord.Interaction
-        The interaction representing the slash command invocation.
-    target_lang : str
-        Language code to translate the message into (e.g., 'en', 'fr').
-    """
-    # Ensure the command is used in a guild
-    if not interaction.guild:
-        await interaction.response.send_message(
-            "This command can only be used inside a server.",
-            ephemeral=True,
-        )
-        return
+async def delete_later(*messages: discord.Message, delay: int = 10) -> None:
+    await asyncio.sleep(delay)
+    for message in messages:
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
-    # Check if the command was invoked from a message context
-    if not interaction.channel:
-        await interaction.response.send_message(
-            "Channel not found.",
-            ephemeral=True,
-        )
-        return
 
-    # Determine the message being replied to
-    # Slash commands on replies provide a reference via interaction.message.reference
-    reference = interaction.message.reference if interaction.message else None
-    if not reference or not reference.message_id:
-        await interaction.response.send_message(
-            "Please reply to a message before using this command.",
-            ephemeral=True,
-        )
+async def handle_translation(ctx: commands.Context, target_lang: str) -> None:
+    if ctx.message.reference is None or ctx.message.reference.message_id is None:
+        msg = await ctx.reply("Reply to a message first, then use this command.")
+        await delete_later(ctx.message, msg)
         return
 
     try:
-        # Fetch the original message from the channel using the reference's message ID
-        original_msg = await interaction.channel.fetch_message(reference.message_id)
-    except Exception:
-        await interaction.response.send_message(
-            "I couldn't find the message you replied to.",
-            ephemeral=True,
-        )
+        original_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    except discord.NotFound:
+        msg = await ctx.reply("I couldn't find the message you replied to.")
+        await delete_later(ctx.message, msg)
+        return
+    except discord.HTTPException:
+        msg = await ctx.reply("There was a problem reading the replied message.")
+        await delete_later(ctx.message, msg)
         return
 
-    # Extract the content of the original message
-    content = (original_msg.content or "").strip()
-    if not content:
-        await interaction.response.send_message(
-            "The replied message has no text to translate.",
-            ephemeral=True,
-        )
+    original_text = (original_message.content or "").strip()
+    if not original_text:
+        msg = await ctx.reply("That message has no text to translate.")
+        await delete_later(ctx.message, msg)
         return
 
-    # Perform the translation using deep_translator
     try:
-        translated_text = GoogleTranslator(source="auto", target=target_lang).translate(content)
+        translated = GoogleTranslator(source="auto", target=target_lang).translate(original_text)
     except Exception as e:
-        await interaction.response.send_message(
-            f"Translation failed: `{e}`",
-            ephemeral=True,
-        )
+        msg = await ctx.reply(f"Translation failed: `{e}`")
+        await delete_later(ctx.message, msg)
         return
 
-    # Map language codes to flag emojis for a nicer display
-    flags = {
-        "en": "🇬🇧",
-        "fr": "🇫🇷",
-        "de": "🇩🇪",
-        "es": "🇪🇸",
-    }
-    flag = flags.get(target_lang, "🌐")
-
-    # Send the translated text ephemerally
-    await interaction.response.send_message(
-        f"{flag} {translated_text}",
-        ephemeral=True,
-    )
+    flag = LANG_FLAGS.get(target_lang, "🌐")
+    reply = await ctx.reply(f"{flag} {translated}")
+    await delete_later(ctx.message, reply)
 
 
-# Define individual slash commands for English, French, German, and Spanish translations
-@bot.tree.command(name="en", description="Translate a replied message into English")
-async def translate_en(interaction: discord.Interaction):
-    await translate_replied_message(interaction, "en")
+@bot.command(name="en")
+async def translate_en(ctx: commands.Context):
+    await handle_translation(ctx, "en")
 
 
-@bot.tree.command(name="fr", description="Translate a replied message into French")
-async def translate_fr(interaction: discord.Interaction):
-    await translate_replied_message(interaction, "fr")
+@bot.command(name="fr")
+async def translate_fr(ctx: commands.Context):
+    await handle_translation(ctx, "fr")
 
 
-@bot.tree.command(name="de", description="Translate a replied message into German")
-async def translate_de(interaction: discord.Interaction):
-    await translate_replied_message(interaction, "de")
+@bot.command(name="de")
+async def translate_de(ctx: commands.Context):
+    await handle_translation(ctx, "de")
 
 
-@bot.tree.command(name="es", description="Translate a replied message into Spanish")
-async def translate_es(interaction: discord.Interaction):
-    await translate_replied_message(interaction, "es")
+@bot.command(name="es")
+async def translate_es(ctx: commands.Context):
+    await handle_translation(ctx, "es")
 
 
 @bot.event
-async def on_ready() -> None:
-    """Called when the bot is ready. Synchronizes slash commands."""
-    try:
-        await bot.tree.sync()
-        print(f"Synced {len(bot.tree.get_commands())} command(s)")
-    except Exception as e:
-        print(f"Command sync failed: {e}")
+async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("Translator bot with slash commands is ready.")
+    print("Reply-command translator bot is ready.")
 
 
 if __name__ == "__main__":
     if not TOKEN:
-        raise RuntimeError("Set DISCORD_BOT_TOKEN in your environment before running the bot.")
+        raise RuntimeError("Set DISCORD_BOT_TOKEN in Railway variables.")
     bot.run(TOKEN)
